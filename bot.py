@@ -17,7 +17,6 @@ from telegram.ext import (
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = os.getenv("ADMIN_ID")  # your numeric Telegram user id, as a string
 DATA_FILE = os.path.join(os.path.dirname(__file__), "data", "content.json")
 
 logging.basicConfig(
@@ -67,18 +66,21 @@ def back_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 
-# ---------- handlers ----------
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_first_name = update.effective_user.first_name or "there"
-    text = (
-        f"👋 Hi {user_first_name}!\n"
+def welcome_text(first_name: str) -> str:
+    return (
+        f"👋 Hi {first_name}!\n"
         f"Welcome to Football Analysis Bot ⚽📊\n\n"
         f"Here you'll find match analysis, statistics, and football "
         f"predictions based on 7 years of experience.\n\n"
         f"What would you like to do?"
     )
-    await update.message.reply_text(text, reply_markup=main_menu_keyboard())
+
+
+# ---------- handlers ----------
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    name = update.effective_user.first_name or "there"
+    await update.message.reply_text(welcome_text(name), reply_markup=main_menu_keyboard())
 
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -99,24 +101,58 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             parse_mode=ParseMode.MARKDOWN,
         )
     elif query.data == "back_to_menu":
-        user_first_name = query.from_user.first_name or "there"
-        text = (
-            f"👋 Hi {user_first_name}!\n"
-            f"Welcome to Football Analysis Bot ⚽📊\n\n"
-            f"Here you'll find match analysis, statistics, and football "
-            f"predictions based on 7 years of experience.\n\n"
-            f"What would you like to do?"
-        )
-        await query.edit_message_text(text, reply_markup=main_menu_keyboard())
-
-
-async def is_admin(update: Update) -> bool:
-    if not ADMIN_ID:
-        return False
-    return str(update.effective_user.id) == str(ADMIN_ID)
+        name = query.from_user.first_name or "there"
+        await query.edit_message_text(welcome_text(name), reply_markup=main_menu_keyboard())
 
 
 async def set_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Admin-only. Usage: /setanalysis <text> """
-    if not await is_admin(update):
-        await update.message.reply_text("This command is only available to the bot admin.")
+    """Usage: /setanalysis <text>"""
+    new_text = " ".join(context.args).strip()
+    if not new_text:
+        await update.message.reply_text(
+            "Usage: /setanalysis <your analysis text>\n\n"
+            "Example:\n/setanalysis PSG vs Marseille - Over 2.5 goals looks likely based on recent form."
+        )
+        return
+
+    content = load_content()
+    content["today_analysis"] = new_text
+    save_content(content)
+    await update.message.reply_text("✅ Today's analysis has been updated.")
+
+
+async def set_about(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Usage: /setabout <text>"""
+    new_text = " ".join(context.args).strip()
+    if not new_text:
+        await update.message.reply_text("Usage: /setabout <your about text>")
+        return
+
+    content = load_content()
+    content["about_text"] = new_text
+    save_content(content)
+    await update.message.reply_text("✅ The 'About' text has been updated.")
+
+
+async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("I didn't recognize that command. Use /start to see the menu.")
+
+
+def main() -> None:
+    if not BOT_TOKEN:
+        raise RuntimeError("BOT_TOKEN environment variable is not set.")
+
+    application = Application.builder().token(BOT_TOKEN).build()
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("setanalysis", set_analysis))
+    application.add_handler(CommandHandler("setabout", set_about))
+    application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
+
+    logger.info("Bot started. Polling for updates...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+if __name__ == "__main__":
+    main()
